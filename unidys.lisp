@@ -6,8 +6,6 @@
 
 (in-package unidys)
 
-(setf *default-timezone* +utc-zone+)
-
 (defparameter *min-timestamp* (encode-timestamp 0 0 0 0 1 1 1))
 (defparameter *max-timestamp* (encode-timestamp 0 0 59 23 31 12 9999))
   
