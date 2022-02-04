@@ -8,12 +8,13 @@
 	   db define-db definition drop-tables
 	   exists?
 	   find-table
-	   get-key get-record
+	   get-key get-model get-rec
+	   integer-column
 	   model model-load model-store model-table
-	   name new-boolean-column new-foreign-key new-key new-rec-proxy new-string-column new-timestamp-column
-	   new-table
+	   name new-boolean-column new-foreign-key new-integer-column new-key new-rec-proxy new-string-column
+	   new-timestamp-column new-table
 	   rec-proxy
-	   set-key string-column
+	   set-key set-model set-rec string-column
 	   table table-create table-drop table-exists? timestamp-column
 	   with-cx))
 
@@ -118,6 +119,20 @@
 
 (defmethod column-decode ((self boolean-column) val)
   (boolean-decode val))
+
+(define-column-type integer-column "INTEGER")
+
+(defun integer-encode (val)
+  (format nil "~a" val))
+
+(defmethod column-encode ((self integer-column) val)
+  (integer-encode val))
+
+(defun integer-decode (val)
+  (parse-integer val))
+
+(defmethod column-decode ((self integer-column) val)
+  (integer-decode val))
 
 (define-column-type string-column "TEXT")
 
@@ -407,8 +422,7 @@
 
 (defstruct rec-proxy
   (table (error "missing table") :type table)
-  (key-values (error "missing key-values") :type vector)
-  (cache nil))
+  (key-values (error "missing key-values") :type vector))
 
 (defun new-rec-proxy (table)
   (make-rec-proxy :table table :key-values (make-array (length (columns (primary-key table))))))
@@ -422,21 +436,49 @@
     (setf (aref key-values i) val)))
 
 (defun get-rec (self)
-  (or (rec-proxy-cache self)
-      (with-slots (key-values) self
-	(with-slots (column-indices columns) (table self)
-	  (let* (k)
-	    (dotimes (i (length columns))
-	      (push (cons (aref columns i) (aref key-values i)) k))
-	    (load-rec (table self) k))))))
+  (with-slots (key-values) self
+    (with-slots (column-indices columns) (table self)
+      (let* (k)
+	(dotimes (i (length columns))
+	  (push (cons (aref columns i) (aref key-values i)) k))
+	(load-rec (table self) k)))))
 
+(defun set-rec (self rec)
+  (with-slots (key-values) self
+    (let ((i 0))
+      (do-columns (c (primary-key (rec-proxy-table self)))
+	(setf (aref key-values i) (rest (assoc c rec)))))))
+
+(defstruct (model-proxy (:include rec-proxy))
+  (type-name (error "missing type-name") :type symbol))
+
+(defun new-model-proxy (table type-name)
+  (make-model-proxy :table table
+		    :key-values (make-array (length (columns (primary-key table))))
+		    :type-name type-name))
+
+(defun set-model (self rec)
+  (with-slots (key-values) self
+    (let ((i 0))
+      (do-columns (c (primary-key (rec-proxy-table self)))
+	(setf (aref key-values i) (slot-value rec (name c)))))))
+
+(defun get-model (self)
+  (let* ((rec (get-rec self))
+	 args)
+    (dolist (f rec)
+      (push (rest f) args)
+      (push (kw! (name (first f))) args))
+    (apply (syms! 'make- (model-proxy-type-name self)) args)))
+    
 (defstruct model
   (exists? nil :type boolean))
 
 (defmethod exists? ((self model))
   (slot-value self 'exists?))
 
-(defmethod model-table (self))
+(defmethod model-table (self)
+  (error "not implemented"))
 
 (defmethod model-load (self rec)
   (let* ((table (model-table self)))
@@ -453,17 +495,23 @@
 	(dolist (fk (foreign-keys table))
 	  (let* ((cs (columns fk)))
 	    (dotimes (i (length cs))
-	      (set-key rp i (assoc (aref cs i) rec))))))))
+	      (let* ((c (aref cs i)))
+		(set-key rp i (column-decode c (rest (assoc c rec)))))))))))
   self)
 
 (defmethod model-store (self)
   (let* ((table (model-table self))
-	 (rec (map-columns (lambda (c) (cons c (column-encode c (slot-value self (name c))))) table)))
+	 rec) 
+    (do-columns (c table)
+      (when (slot-exists-p self (name c))
+	(push (cons c (column-encode c (slot-value self (name c)))) rec)))
+    
     (dolist (fk (foreign-keys table))
       (let* ((rp (slot-value self (name fk)))
 	     (cs (columns fk)))
 	(dotimes (i (length cs))
-	  (push (cons (aref cs i) (get-key rp i)) rec))))
+	  (let* ((c (aref cs i)))
+	    (push (cons c (column-encode c (get-key rp i))) rec)))))
     
     (with-slots (exists?) self
       (if exists?
@@ -525,7 +573,8 @@
 
 (defun drop-tables ()
   (dolist (tbl (tables *db*))
-    (table-drop tbl)))
+    (if (exists? tbl)
+	(table-drop tbl))))
 
 (defun tests ()
   (with-cx ("test" "test" "test")

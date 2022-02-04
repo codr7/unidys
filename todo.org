@@ -1,7 +1,4 @@
-* add model-proxy
-** override get-record
-** use in rc.created-by
-** add cap table
+* store cap automagically on rc insert
 * add web ui
 ** html api from gappkit/dom
 * add transaction/*transaction*
