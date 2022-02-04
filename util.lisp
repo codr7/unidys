@@ -1,6 +1,6 @@
 (defpackage unidys-util
   (:use cl)
-  (:export dohash str! sym! syms!))
+  (:export dohash kw! str! sym! syms!))
 
 (in-package unidys-util)
 
@@ -16,6 +16,12 @@
 		(declare (ignorable ,k))
 		,@body
 		(go ,$next))))))))
+
+(defmethod kw! ((val symbol))
+  (kw! (symbol-name val)))
+
+(defmethod kw! ((val string))
+  (intern (string-upcase val) 'keyword))
 
 (defmethod str! ((val string))
   val)

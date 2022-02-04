@@ -1,23 +1,9 @@
-* add foreign key
-** add column-clone method
-** write forign-key-add
-*** copy key
-** track rdeps in table
-*** add foreign-keys
-*** loop instead of primary-key in table-create
-** add table-add method
-** implement for key/foreign-key
-** create references for in model-load
-** copy key to columns in model-store
-* rewrite unidys.lisp
-** add macros to simply code
-* add table-synk? fn
-** synk columns/deps if table exists
-** return t if changes made
-* add web based table explorer
-** steal html api from gappkit/dom
-** read pg_tables for list
-** implement paging
+* add model-proxy
+** override get-record
+** use in rc.created-by
+** add cap table
+* add web ui
+** html api from gappkit/dom
 * add transaction/*transaction*
 * add prepare-query
 ** add PQsendPrepare
