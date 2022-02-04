@@ -1,4 +1,6 @@
-* store cap automagically on rc insert
+* finish caps
+** add cap struct
+** create on rc insert
 * add web ui
 ** html api from gappkit/dom
 * add transaction/*transaction*

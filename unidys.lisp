@@ -59,8 +59,13 @@
     
     (let* ((*user* (new-user "admin")))
       (model-store *user*)
-      (let* ((people (new-rc "people")))
-	(model-store people)))))
+      
+      (let* ((lodging (new-rc "lodging"))
+	     (cabins (new-rc "cabins"))
+	     (rooms (new-rc "rooms")))
+	(model-store lodging)
+	(model-store cabins)
+	(model-store rooms)))))
 
 (defun main ()
   (with-db ("test" "test" "test")
