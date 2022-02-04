@@ -11,8 +11,13 @@
 ** copy key to columns in model-store
 * rewrite unidys.lisp
 ** add macros to simply code
-* add table-synk fn
+* add table-synk? fn
 ** synk columns/deps if table exists
+** return t if changes made
+* add web based table explorer
+** steal html api from gappkit/dom
+** read pg_tables for list
+** implement paging
 * add transaction/*transaction*
 * add prepare-query
 ** add PQsendPrepare
