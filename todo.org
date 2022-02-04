@@ -1,6 +1,8 @@
-* finish caps
-** add cap struct
-** create on rc insert
+* add rc-trees
+** foreign keys: parent/child
+** both primary
+** add struct
+* add update-caps fn
 * add web ui
 ** html api from gappkit/dom
 * add transaction/*transaction*

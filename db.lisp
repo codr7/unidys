@@ -10,9 +10,9 @@
 	   find-table
 	   get-key get-model get-rec
 	   integer-column
-	   model model-load model-store model-table
-	   name new-boolean-column new-foreign-key new-integer-column new-key new-rec-proxy new-string-column
-	   new-timestamp-column new-table
+	   model model-load model-proxy model-store model-table
+	   name new-boolean-column new-foreign-key new-integer-column new-key new-model-proxy new-rec-proxy
+	   new-string-column new-timestamp-column new-table
 	   rec-proxy
 	   set-key set-model set-rec string-column
 	   table table-create table-drop table-exists? timestamp-column
