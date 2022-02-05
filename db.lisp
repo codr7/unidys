@@ -293,7 +293,7 @@
                  SELECT FROM pg_tables
                  WHERE tablename  = $1
                )"
-	      (list (str! (name self))))
+	      (list (to-sql (name self))))
   (let* ((r (get-result)))
     (assert (= (PQntuples r) 1))
     (assert (= (PQnfields r) 1))
@@ -313,7 +313,7 @@
 		    (let* ((c (aref columns i)))
 		      (unless (eq c (aref columns 0))
 			(format out ", "))
-		      (format out "~a ~a" (to-sql c) (data-type c))))
+		      (format out "~a ~a NOT NULL" (to-sql c) (data-type c))))
 		  (format out ")")))))
     (send-query sql '()))
   (multiple-value-bind (r s) (get-result)

@@ -1,8 +1,8 @@
-* add rc-trees
-** foreign keys: parent/child
-** both primary
-** add struct
 * add update-caps fn
+* add cap type
+** automatic/fixed/unlimited
+** postgresql enum
+** add rc column
 * add web ui
 ** html api from gappkit/dom
 * add transaction/*transaction*
