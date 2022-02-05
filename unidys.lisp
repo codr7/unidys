@@ -15,8 +15,13 @@
   (table users (name)
 	 (column name string)
 	 (column created-at timestamp))
+  (enum rc-type
+	automatic
+	fixed
+	unlimited)
   (table rcs (name)
 	 (column name string)
+	 (column type rc-type)
 	 (column created-at timestamp)
 	 (foreign-key created-by users))
   (table rc-trees (parent-name child-name)
@@ -37,10 +42,10 @@
   (make-user :name name))
 
 (defmethod unidys-db:model-table ((self user))
-  (find-table 'users))
+  (find-def 'users))
 
 (defstruct (cap (:include model))
-  (rc (new-model-proxy (find-table 'rcs) 'rc) :type model-proxy)
+  (rc (new-model-proxy (find-def 'rcs) 'rc) :type model-proxy)
   (starts-at *min-timestamp* :type timestamp)
   (ends-at *max-timestamp* :type timestamp)
   (total 0 :type integer)
@@ -52,12 +57,13 @@
     self))
 
 (defmethod unidys-db:model-table ((self cap))
-  (find-table 'caps))
+  (find-def 'caps))
 
 (defstruct (rc (:include model))
   (name "" :type string)
+  (type :automatic :type keyword)
   (created-at (now) :type timestamp)
-  (created-by (new-model-proxy (find-table 'users) 'user) :type model-proxy))
+  (created-by (new-model-proxy (find-def 'users) 'user) :type model-proxy))
 		
 (defun new-rc (name &rest args)
   (let ((self (apply #'make-rc :name name args)))
@@ -65,14 +71,14 @@
     self))
 
 (defmethod unidys-db:model-table ((self rc))
-  (find-table 'rcs))
+  (find-def 'rcs))
 
 (defmethod unidys-db:model-store :after ((self rc))
   (model-store (new-cap self)))
 
 (defstruct (rc-tree (:include model))
-  (parent (new-model-proxy (find-table 'rcs) 'rc) :type model-proxy)
-  (child (new-model-proxy (find-table 'rcs) 'rc) :type model-proxy))
+  (parent (new-model-proxy (find-def 'rcs) 'rc) :type model-proxy)
+  (child (new-model-proxy (find-def 'rcs) 'rc) :type model-proxy))
 
 (defun new-rc-tree (parent child &rest args)
   (let ((self (apply #'make-rc-tree args)))
@@ -81,7 +87,7 @@
     self))
 
 (defmethod unidys-db:model-table ((self rc-tree))
-  (find-table 'rc-trees))
+  (find-def 'rc-trees))
 
 (defun rc-add-child (parent child)
   (model-store (new-rc-tree parent child)))
@@ -92,10 +98,10 @@
        ,@body)))
 
 (defun db-init ()
-  (drop-tables)
+  (drop *db*)
   
-  (unless (table-exists? (find-table 'users))
-    (create-tables)
+  (unless (exists? (find-def 'users))
+    (create *db*)
     
     (let* ((*user* (new-user "admin")))
       (model-store *user*)
@@ -116,4 +122,3 @@
 (defun tests ()
   (with-db ("test" "test" "test")
     (db-init)))
-

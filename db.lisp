@@ -4,10 +4,10 @@
   (:import-from local-time format-timestring parse-timestring timestamp)
   (:export *cx* *db*
 	   boolean-column
-	   column create-tables
-	   db define-db definition drop-tables
+	   column create
+	   db define-db definition drop
 	   exists?
-	   find-table
+	   find-def
 	   get-key get-model get-rec
 	   integer-column
 	   model model-load model-proxy model-store model-table
@@ -88,6 +88,59 @@
 
 (defmethod to-sql ((self definition))
   (to-sql (name self)))
+
+(defclass enum (definition)
+  ((alts :initarg :alts :reader alts)))
+
+(defun new-enum (name &rest alts)
+  (make-instance 'enum :name name :alts (make-array (length alts) :element-type 'keyword :initial-contents alts)))
+
+(defun enum-create (self)
+  (let* ((sql (with-output-to-string (out)
+		(format out "CREATE TYPE ~a AS ENUM (" (to-sql self))
+		(with-slots (alts) self
+		  (dotimes (i (length alts))
+		    (unless (zerop i)
+		      (format out ", "))
+		    (format out "'~a'" (to-sql (aref alts i))))
+		  (format out ")")))))
+    (send-query sql '()))
+  (multiple-value-bind (r s) (get-result)
+    (assert (eq s :PGRES_COMMAND_OK))
+    (PQclear r))
+  (assert (null (get-result))))
+
+(defmethod create ((self enum))
+  (enum-create self))
+
+(defun enum-drop (self)
+  (let* ((sql (format nil "DROP TYPE IF EXISTS ~a" (to-sql self))))
+    (send-query sql '()))
+  (multiple-value-bind (r s) (get-result)
+    (assert (eq s :PGRES_COMMAND_OK))    
+    (PQclear r))
+  (assert (null (get-result)))
+  nil)
+
+(defmethod drop ((self enum))
+  (enum-drop self))
+
+(defun enum-exists? (self)
+  (send-query "SELECT EXISTS (
+                 SELECT FROM pg_type
+                 WHERE typname  = $1
+               )"
+	      (list (to-sql (name self))))
+  (let* ((r (get-result)))
+    (assert (= (PQntuples r) 1))
+    (assert (= (PQnfields r) 1))
+    (let* ((result (boolean-decode (PQgetvalue r 0 0))))
+      (PQclear r)
+      (assert (null (get-result)))
+      result)))
+
+(defmethod exists? ((self enum))
+  (enum-exists? self))
 
 (defclass column (definition)
   ())
@@ -310,17 +363,18 @@
 		(format out "CREATE TABLE ~a (" (to-sql self))
 		(with-slots (columns) self
 		  (dotimes (i (length columns))
+		    (unless (zerop i)
+		      (format out ", "))
+		    
 		    (let* ((c (aref columns i)))
-		      (unless (eq c (aref columns 0))
-			(format out ", "))
 		      (format out "~a ~a NOT NULL" (to-sql c) (data-type c))))
 		  (format out ")")))))
     (send-query sql '()))
   (multiple-value-bind (r s) (get-result)
     (assert (eq s :PGRES_COMMAND_OK))
     (PQclear r))
+  
   (assert (null (get-result)))
-
   (key-create (primary-key self) self)
   
   (dolist (fk (foreign-keys self))
@@ -521,11 +575,11 @@
 	    (setf exists? t))))))
 
 (defclass db ()
-  ((tables :initform nil :reader tables)
-   (table-lookup :initform (make-hash-table) :reader table-lookup)))
+  ((defs :initform nil :reader defs)
+   (def-lookup :initform (make-hash-table) :reader def-lookup)))
 
-(defun find-table (name &key (db *db*))
-  (gethash name (table-lookup db)))
+(defun find-def (name &key (db *db*))
+  (gethash name (def-lookup db)))
 
 (defmacro define-db (name &body forms)
   (let* (init-forms)
@@ -540,7 +594,7 @@
 			  (parse-foreign-key (f)
 			    (let* ((name (pop f))
 				   (table (pop f)))
-			      (push `(new-foreign-key ',name (find-table ',table :db self) ,@f) defs)))
+			      (push `(new-foreign-key ',name (find-def ',table :db self) ,@f) defs)))
 			  (parse-table-form (f)
 			    (ecase (kw! (first f))
 			      (:column
@@ -551,11 +605,26 @@
 		     (parse-table-form tf)))
 		 
 		 (push `(let* ((table (new-table ',name '(,@key-cols) (list ,@(nreverse defs)))))
-			  (push table tables)
-			  (setf (gethash ',name table-lookup) table))
+			  (push table defs)
+			  (setf (gethash ',name def-lookup) table))
+		       init-forms)))
+	     (parse-enum (f)
+	       (let* ((name (first f))
+		      (ct (syms! name '-column)))
+		 (push `(let* ((enum (new-enum ',name ,@(mapcar #'kw! (rest f)))))
+			  (push enum defs)
+			  (setf (gethash ',name def-lookup) enum)
+			  (define-column-type ,ct ,(to-sql name))
+			  
+			  (defmethod column-encode ((self ,ct) val)
+			    (str! val))
+			  
+			  (defmethod column-decode ((self ,ct) val)
+			    (kw! val)))
 		       init-forms)))
 	     (parse-form (f)
 	       (ecase (kw! (first f))
+		 (:enum (parse-enum (rest f)))
 		 (:table (parse-table (rest f))))))
       (dolist (f forms)
 	(parse-form f))
@@ -564,17 +633,17 @@
 	   ())
 	 
 	 (defmethod initialize-instance :after ((self ,name) &key)
-	   (with-slots (table-lookup tables) self
+	   (with-slots (def-lookup defs) self
 	     ,@(nreverse init-forms)))))))
 
-(defun create-tables ()
-  (dolist (tbl (reverse (tables *db*)))
-    (table-create tbl)))
+(defmethod create ((self db))
+  (dolist (d (reverse (defs self)))
+    (create d)))
 
-(defun drop-tables ()
-  (dolist (tbl (tables *db*))
-    (if (exists? tbl)
-	(table-drop tbl))))
+(defmethod drop ((self db))
+  (dolist (d (defs self))
+    (if (exists? d)
+	(drop d))))
 
 (defun tests ()
   (with-cx ("test" "test" "test")

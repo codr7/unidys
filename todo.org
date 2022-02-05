@@ -1,8 +1,6 @@
 * add update-caps fn
-* add cap type
-** automatic/fixed/unlimited
-** postgresql enum
-** add rc column
+** use recursive cte to find caps
+** only recurse if automatic
 * add web ui
 ** html api from gappkit/dom
 * add transaction/*transaction*
