@@ -38,13 +38,13 @@
 
 (defstruct (cap (:include model))
   (rc (new-model-proxy (find-table 'rcs) 'rc) :type model-proxy)
-  (starts-at (error "missing starts-at") :type timestamp)
-  (ends-at (error "missing ends-at") :type timestamp)
-  (total (error "missing total") :type integer)
-  (used (error "missing used") :type integer))
+  (starts-at *min-timestamp* :type timestamp)
+  (ends-at *max-timestamp* :type timestamp)
+  (total 0 :type integer)
+  (used 0 :type integer))
 
-(defun new-cap (rc starts-at ends-at total used)
-  (let ((self (make-cap :starts-at starts-at :ends-at ends-at :total total :used used)))
+(defun new-cap (rc &rest args)
+  (let ((self (apply #'make-cap args)))
     (set-model (cap-rc self) rc)
     self))
 
@@ -65,7 +65,7 @@
   (find-table 'rcs))
 
 (defmethod unidys-db:model-store :after ((self rc))
-  (model-store (new-cap self *min-timestamp* *max-timestamp* 0 0)))
+  (model-store (new-cap self)))
 
 (defmacro with-db ((&rest args) &body body)
   `(with-cx (,@args)
