@@ -307,7 +307,8 @@
 
 (defclass table (definition relation)
   ((primary-key :reader primary-key)
-   (foreign-keys :initform nil :reader foreign-keys)))
+   (foreign-keys :initform nil :reader foreign-keys)
+   (def-lookup :initform (make-hash-table))))
 
 (defmethod print-object ((self table) out)
   (format out "(Table ~a)" (str! (name self))))
@@ -319,26 +320,34 @@
     (nreverse out)))
 
 (defmethod table-add (table (col column))
-  (with-slots (columns column-indices) table
+  (with-slots (columns column-indices def-lookup) table
+    (setf (gethash (name col) def-lookup) col)
     (setf (gethash (name col) column-indices) (length columns))
     (vector-push-extend col columns)))
 
 (defmethod table-add (table (key foreign-key))
-  (with-slots (foreign-keys) table
+  (with-slots (def-lookup foreign-keys) table
+    (setf (gethash (name key) def-lookup) key)
     (push key foreign-keys)
     
     (do-columns (c key)
       (table-add table c))))
 
-(defun new-table (name primary-cols defs)
+(defun new-table (name primary-defs defs)
   (let* ((table (make-instance 'table :name name)))
     (dolist (d defs)
       (table-add table d))
     
-    (with-slots (columns column-indices primary-key) table
-      (setf primary-key
-	    (new-key (intern (format nil "~a-primary" name))
-		     (mapcar (lambda (c) (aref columns (gethash c column-indices))) primary-cols))))
+    (with-slots (columns column-indices def-lookup primary-key) table
+      (let* (primary-cols)
+	(dolist (dk primary-defs)
+	  (let ((d (gethash dk def-lookup)))
+	    (etypecase d
+	      (column (push d primary-cols))
+	      (key (do-columns (c d) (push c primary-cols))))))
+	(setf primary-key
+	      (new-key (intern (format nil "~a-primary" name)) primary-cols))))
+    
     table))
 
 (defun table-exists? (self)
