@@ -1,7 +1,8 @@
 (defpackage unidys-pg
   (:use cffi cl)
   (:import-from unidys-util str!)
-  (:export PQclear PQconnectdb
+  (:export *timestamp-format*
+	   PQclear PQconnectdb
 	   PQerrorMessage
 	   PQfinish PQfname
 	   PQgetResult PQgetvalue

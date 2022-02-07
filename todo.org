@@ -1,6 +1,5 @@
-* add update-caps fn
-** use recursive cte to find caps
-** only recurse if automatic
+* use recursive cte in get-caps
+*** only if type=automatic
 * add web ui
 ** html api from gappkit/dom
 * add transaction/*transaction*

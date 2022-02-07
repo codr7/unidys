@@ -1,6 +1,6 @@
 (defpackage unidys
-  (:use cl unidys-db)
-  (:import-from local-time encode-timestamp now timestamp)
+  (:use cl unidys-db unidys-pg)
+  (:import-from local-time encode-timestamp now timestamp timestamp< timestamp>)
   (:import-from unidys-util syms!)
   (:export main tests))
 
@@ -8,7 +8,7 @@
 
 (defparameter *min-timestamp* (encode-timestamp 0 0 0 0 1 1 1))
 (defparameter *max-timestamp* (encode-timestamp 0 0 59 23 31 12 9999))
-  
+
 (defvar *user*)
 
 (define-db unidys-db
@@ -64,7 +64,7 @@
   (type :automatic :type keyword)
   (created-at (now) :type timestamp)
   (created-by (new-model-proxy (find-def 'users) 'user) :type model-proxy))
-		
+
 (defun new-rc (name &rest args)
   (let ((self (apply #'make-rc :name name args)))
     (set-model (rc-created-by self) *user*)
@@ -92,6 +92,52 @@
 (defun rc-add-child (parent child)
   (model-store (new-rc-tree parent child)))
 
+(defun get-caps (rc &key (starts-at (now)) (ends-at *max-timestamp*))
+  (let* ((sql (with-output-to-string (out)
+		(format out "SELECT ")
+
+		(let* ((i 0))
+		  (do-columns (c (find-def 'caps))
+		    (unless (zerop i)
+		      (format out ", "))
+		    (format out (to-sql c))
+		    (incf i)))
+
+		(format out " FROM caps where rc_name = $1 AND starts_at < $2 AND ends_at > $3"))))
+    
+    (send-query sql (list (rc-name rc) (to-sql ends-at) (to-sql starts-at))))
+
+  (labels ((get-next (out)
+	     (let* ((r (get-result)))
+	       (if (and r (not (zerop (PQntuples r))))
+		   (progn
+		     (let* ((cap (new-cap rc)))
+		       (model-load cap (load-rec (find-def 'caps) r))
+		       (PQclear r)
+		       (get-next (cons cap out))))
+		   (nreverse out)))))
+    (get-next nil)))
+
+(defun update-caps (in &key (starts-at (now)) (ends-at *max-timestamp*) (total 0) (used 0))
+  (let (out)
+    (dolist (c in)
+      (when (timestamp< (cap-starts-at c) starts-at)
+	(let* ((prefix c))
+	  (setf c (model-clone c 'starts-at starts-at))
+	  (setf (cap-ends-at prefix) starts-at)
+	  (push prefix out))
+	
+	(incf (cap-total c) total)
+	(incf (cap-used c) used)
+	(push c out)
+
+	(when (timestamp> (cap-ends-at c) ends-at)
+	  (let ((suffix (copy-structure c)))
+	    (setf (cap-starts-at suffix) ends-at)
+	    (setf (cap-ends-at c) ends-at)
+	    (push suffix out)))))
+    out))
+
 (defmacro with-db ((&rest args) &body body)
   `(with-cx (,@args)
      (let* ((*db* (make-instance 'unidys-db)))
@@ -108,12 +154,20 @@
       
       (let* ((lodging (new-rc "lodging"))
 	     (cabins (new-rc "cabins"))
-	     (rooms (new-rc "rooms")))
+	     (rooms (new-rc "rooms"))
+	     (room1 (new-rc "room1" :type :fixed)))
 	(model-store lodging)
 	(model-store cabins)
 	(rc-add-child lodging cabins)
 	(model-store rooms)
-	(rc-add-child lodging rooms)))))
+	(rc-add-child lodging rooms)
+	(model-store room1)
+	(rc-add-child rooms room1)
+
+	(let* ((cs1 (get-caps room1))
+	       (cs2 (update-caps cs1 :total 1)))
+	  (dolist (c cs2)
+	    (model-store c)))))))
 
 (defun main ()
   (with-db ("test" "test" "test")

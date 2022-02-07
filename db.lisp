@@ -1,21 +1,22 @@
 (defpackage unidys-db
   (:use cffi cl unidys-pg)
   (:import-from unidys-util dohash kw! str! sym! syms!)
-  (:import-from local-time format-timestring parse-timestring timestamp)
+  (:import-from local-time encode-timestamp format-timestring timestamp)
   (:export *cx* *db*
 	   boolean-column
-	   column create
-	   db define-db definition drop
+	   column column-from-sql column-to-sql create
+	   db define-db definition do-columns drop
 	   exists?
-	   find-def
-	   get-key get-model get-rec
+	   find-def find-rec
+	   get-key get-model get-rec get-result
 	   integer-column
-	   model model-load model-proxy model-store model-table
+	   load-rec
+	   model model-clone model-load model-proxy model-store model-table
 	   name new-boolean-column new-foreign-key new-integer-column new-key new-model-proxy new-rec-proxy
 	   new-string-column new-timestamp-column new-table
 	   rec-proxy
-	   set-key set-model set-rec string-column
-	   table table-create table-drop table-exists? timestamp-column
+	   set-key set-model set-rec send-query string-column
+	   table table-create table-drop table-exists? timestamp-column to-sql
 	   with-cx))
 
 (in-package unidys-db)
@@ -134,7 +135,7 @@
   (let* ((r (get-result)))
     (assert (= (PQntuples r) 1))
     (assert (= (PQnfields r) 1))
-    (let* ((result (boolean-decode (PQgetvalue r 0 0))))
+    (let* ((result (boolean-from-sql (PQgetvalue r 0 0))))
       (PQclear r)
       (assert (null (get-result)))
       result)))
@@ -147,6 +148,9 @@
 
 (defmethod column-clone ((self column) name)
   (make-instance (type-of self) :name name))
+
+(defmethod column-to-sql (self val)
+  (to-sql val))
 
 (defmacro define-column-type (name data-type)
   `(progn
@@ -161,53 +165,54 @@
 
 (define-column-type boolean-column "BOOLEAN")
 
-(defun boolean-encode (val)
+(defmethod boolean-to-sql (val)
   (if val "t" "f"))
 
-(defmethod column-encode ((self boolean-column) val)
-  (boolean-encode val))
+(defmethod column-to-sql ((self boolean-column) val)
+  (boolean-to-sql val))
 
-(defun boolean-decode (val)
+(defun boolean-from-sql (val)
   (string= val "t"))
 
-(defmethod column-decode ((self boolean-column) val)
-  (boolean-decode val))
+(defmethod column-from-sql ((self boolean-column) val)
+  (boolean-from-sql val))
 
 (define-column-type integer-column "INTEGER")
 
-(defun integer-encode (val)
-  (format nil "~a" val))
+(defmethod to-sql ((self integer))
+  (format nil "~a" self))
 
-(defmethod column-encode ((self integer-column) val)
-  (integer-encode val))
-
-(defun integer-decode (val)
+(defun integer-from-sql (val)
   (parse-integer val))
 
-(defmethod column-decode ((self integer-column) val)
-  (integer-decode val))
+(defmethod column-from-sql ((self integer-column) val)
+  (integer-from-sql val))
 
 (define-column-type string-column "TEXT")
 
-(defmethod column-encode ((self string-column) val)
+(defmethod column-to-sql ((self string-column) val)
   val)
 
-(defmethod column-decode ((self string-column) val)
+(defmethod column-from-sql ((self string-column) val)
   val)
 
 (define-column-type timestamp-column "TIMESTAMP")
 
-(defun timestamp-encode (val)
-  (format-timestring nil val)) 
+(defmethod to-sql ((self timestamp))
+  (format-timestring nil self)) 
 
-(defmethod column-encode ((self timestamp-column) val)
-  (timestamp-encode val))
+(defun timestamp-from-sql (val)
+  (flet ((p (i) (parse-integer val :start i :junk-allowed t)))
+    (let* ((year (p 0))
+	   (month (p 5))
+	   (day (p 8))
+	   (h (p 11))
+	   (m (p 14))
+	   (s (p 17)))
+      (encode-timestamp 0 s m h day month year))))
 
-(defun timestamp-decode (val)
-  (parse-timestring val))
-
-(defmethod column-decode ((self timestamp-column) val)
-  (timestamp-decode val))
+(defmethod column-from-sql ((self timestamp-column) val)
+  (timestamp-from-sql val))
 
 (defclass relation ()
   ((columns :initform (make-array 0 :element-type 'column :fill-pointer 0) :reader columns)
@@ -359,7 +364,7 @@
   (let* ((r (get-result)))
     (assert (= (PQntuples r) 1))
     (assert (= (PQnfields r) 1))
-    (let* ((result (boolean-decode (PQgetvalue r 0 0))))
+    (let* ((result (boolean-from-sql (PQgetvalue r 0 0))))
       (PQclear r)
       (assert (null (get-result)))
       result)))
@@ -407,7 +412,14 @@
 (defmethod drop ((self table))
   (table-drop self))
 
-(defun load-rec (table key)
+(defun load-rec (table result &key rec (offset 0))
+  (let* ((i offset))
+    (do-columns (c table)
+      (push (cons c (PQgetvalue result 0 i)) rec)
+      (incf i))
+    rec))
+
+(defun find-rec (table key)
   (let* ((sql (with-output-to-string (out)
 		(format out "SELECT ")
 		(let* ((i 0))
@@ -425,13 +437,10 @@
     (send-query sql (mapcar #'rest key)))
   (multiple-value-bind (r s) (get-result)
     (assert (eq s :PGRES_TUPLES_OK))
-    (let* (out (i 0))
-      (do-columns (c table)
-	(push (cons c (column-decode c (PQgetvalue r 0 i))) out)
-	(incf i))
+    (let ((rec (load-rec table r)))
       (PQclear r)
       (assert (null (get-result)))
-      out)))
+      rec)))
 
 (defun insert-rec (table rec)
   (let* ((sql (with-output-to-string (out)
@@ -464,7 +473,7 @@
 		  (with-slots (column-indices columns) table
 		    (dolist (f rec)
 		      (let* ((c (first f)))
-			(unless (gethash c column-indices)
+			(unless (gethash (name c) column-indices)
 			  (error "unknown column: ~a" c))
 			(unless (eq f (first rec))
 			  (format out ", "))
@@ -474,8 +483,7 @@
 		  (dolist (f rec)
 		    (unless (zerop i)
 		      (format out " AND "))
-		    (format out "~a=$~a" (to-sql (first f)) (incf i))))
-		(format out ")"))))
+		    (format out "~a=$~a" (to-sql (first f)) (incf i)))))))
     (send-query sql (mapcar #'rest rec)))
   (multiple-value-bind (r s) (get-result)
     (assert (eq s :PGRES_COMMAND_OK))    
@@ -504,7 +512,7 @@
       (let* (k)
 	(dotimes (i (length columns))
 	  (push (cons (aref columns i) (aref key-values i)) k))
-	(load-rec (table self) k)))))
+	(find-rec (table self) k)))))
 
 (defun set-rec (self rec)
   (with-slots (key-values) self
@@ -543,6 +551,19 @@
 (defmethod model-table (self)
   (error "not implemented"))
 
+(defun model-clone (in &rest updates)
+  (let ((out (copy-structure in)))
+    (setf (slot-value out 'exists?) nil)
+    
+    (labels ((next ()
+	       (let* ((k (pop updates))
+		      (v (pop updates)))
+		 (when k
+		   (setf (slot-value out k) v)
+		   (next)))))
+      (next))
+    out))		
+
 (defmethod model-load (self rec)
   (let* ((table (model-table self)))
     (dolist (f rec)
@@ -551,15 +572,17 @@
 	(with-slots (column-indices) table
 	  (when (slot-exists-p self k)
 	    (when (gethash k column-indices)
-	      (setf (slot-value self k) (column-decode c (rest f))))))))
+	      (setf (slot-value self k) (column-from-sql c (rest f))))))))
     
-    (let* ((rp (slot-value self (name self))))
       (with-slots (column-indices columns) table
 	(dolist (fk (foreign-keys table))
-	  (let* ((cs (columns fk)))
+	  (let* ((rp (slot-value self (name fk)))
+		 (cs (columns fk)))
 	    (dotimes (i (length cs))
 	      (let* ((c (aref cs i)))
-		(set-key rp i (column-decode c (rest (assoc c rec)))))))))))
+		(set-key rp i (column-from-sql c (rest (assoc c rec))))))))))
+  
+  (setf (slot-value self 'exists?) t)
   self)
 
 (defmethod model-store (self)
@@ -567,14 +590,14 @@
 	 rec) 
     (do-columns (c table)
       (when (slot-exists-p self (name c))
-	(push (cons c (column-encode c (slot-value self (name c)))) rec)))
+	(push (cons c (column-to-sql c (slot-value self (name c)))) rec)))
     
     (dolist (fk (foreign-keys table))
       (let* ((rp (slot-value self (name fk)))
 	     (cs (columns fk)))
 	(dotimes (i (length cs))
 	  (let* ((c (aref cs i)))
-	    (push (cons c (column-encode c (get-key rp i))) rec)))))
+	    (push (cons c (column-to-sql c (get-key rp i))) rec)))))
     
     (with-slots (exists?) self
       (if exists?
@@ -625,10 +648,10 @@
 			  (setf (gethash ',name def-lookup) enum)
 			  (define-column-type ,ct ,(to-sql name))
 			  
-			  (defmethod column-encode ((self ,ct) val)
+			  (defmethod column-to-sql ((self ,ct) val)
 			    (str! val))
 			  
-			  (defmethod column-decode ((self ,ct) val)
+			  (defmethod column-from-sql ((self ,ct) val)
 			    (kw! val)))
 		       init-forms)))
 	     (parse-form (f)
