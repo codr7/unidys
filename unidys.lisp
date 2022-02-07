@@ -132,8 +132,7 @@
 	(push c out)
 
 	(when (timestamp> (cap-ends-at c) ends-at)
-	  (let ((suffix (copy-structure c)))
-	    (setf (cap-starts-at suffix) ends-at)
+	  (let ((suffix (model-clone c 'starts-at ends-at)))
 	    (setf (cap-ends-at c) ends-at)
 	    (push suffix out)))))
     out))
